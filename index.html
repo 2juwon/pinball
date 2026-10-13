@@ -33,6 +33,9 @@
   --brass: #e6b85c;        /* 핀 */
   --ramp: #3cc8b4;         /* 지그재그 경사로 */
   --spinner: #6b8cff;      /* 풍차 */
+  --fur: #f2a35e;          /* 고양이 손 */
+  --fur-dark: #b0642a;
+  --bean: #ff9fb4;
   --ink: #f3eee6;
   --muted: #a39bb2;
   --panel: #1a1623;
@@ -342,6 +345,12 @@ legend { padding: 0; margin-bottom: 6px; }
       <input type="checkbox" id="skills" checked>
       <span class="track" aria-hidden="true"></span>
       <span><b>스킬</b> 구슬이 가끔 펑 터져서 주변 구슬을 밀어내요</span>
+    </label>
+
+    <label class="toggle" for="cats">
+      <input type="checkbox" id="cats" checked>
+      <span class="track" aria-hidden="true"></span>
+      <span><b>고양이 손</b> 고양이가 가끔 구슬을 훔쳐 가서 뒤쪽에 다시 떨어뜨려요</span>
     </label>
 
     <p class="error" id="setupError" hidden></p>
@@ -730,6 +739,12 @@ legend { padding: 0; margin-bottom: 6px; }
       this.skillGap = Math.max(8, this.N);
       for (const m of this.marbles) m.skillCd = 2 + this.rng() * this.skillGap;
       this.skillCount = 0;
+      // 고양이 손: 가끔 구슬 하나를 낚아채 갔다가 위쪽 코스에 다시 떨어뜨림
+      this.cats = opts.cats !== false;
+      this.catCd = 4 + this.rng() * 4;
+      this.cat = null;
+      this.held = [];
+      this.catCount = 0;
       for (const r of map.rotors) r.angle = this.rng() * Math.PI * 2;
       for (const o of map.circs) o.flash = 0;
     }
@@ -797,6 +812,8 @@ legend { padding: 0; margin-bottom: 6px; }
         }
       }
 
+      if (this.cats) this.updateCat(H);
+
       let fin = null;
       for (let i = act.length - 1; i >= 0; i--) {
         if (act[i].y > map.finishY) { (fin || (fin = [])).push(act[i]); act.splice(i, 1); }
@@ -818,12 +835,61 @@ legend { padding: 0; margin-bottom: 6px; }
       const T = this.targetRank, F = this.finished.length;
       let w = null;
       if (F >= T) w = this.finished[T - 1];
-      else if (T === this.N && this.active.length === 1) w = this.active[0];
+      else if (T === this.N && this.active.length + this.held.length === 1) w = this.active[0] || this.held[0];
       if (w) {
         this.winner = w;
         this.winTime = this.time;
         this.events.push({ type: 'winner', m: w });
       }
+    }
+
+    updateCat(H) {
+      const map = this.map, c = this.cat;
+      const ease = (k) => (k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2);
+      if (c) {
+        c.t += H;
+        const m = c.m;
+        if (c.t < 0.45) {                       // 앞발이 쭉 뻗어 옴
+          const k = ease(c.t / 0.45);
+          c.px = c.ox + (c.gx - c.ox) * k; c.py = c.oy + (c.gy - c.oy) * k;
+          m.x = c.gx; m.y = c.gy;
+        } else if (c.t < 1.15) {                // 구슬을 쥐고 벽 밖으로
+          const k = ease((c.t - 0.45) / 0.7);
+          c.px = c.gx + (c.ox - c.gx) * k; c.py = c.gy + (c.oy - 150 - c.gy) * k;
+          m.x = c.px; m.y = c.py;
+        } else if (c.t < 1.9) {                 // 잠깐 사라짐
+          m.hidden = true; c.px = c.ox; c.py = c.oy - 150;
+        } else {                                // 위쪽 코스에 다시 떨어뜨림
+          m.hidden = false;
+          m.x = c.dropX; m.y = c.dropY; m.vx = 0; m.vy = 60;
+          m.best = m.y; m.stall = 0;
+          this.held.splice(this.held.indexOf(m), 1);
+          this.active.push(m);
+          this.events.push({ type: 'catdrop', m, x: m.x, y: m.y });
+          this.cat = null;
+          this.catCd = 5 + this.rng() * 5;
+        }
+        return;
+      }
+      if (this.winner || (this.catCd -= H) > 0) return;
+      // 화면에서 보이도록 지금 당첨 후보 근처 구슬 중에서 무작위로 고른다
+      const ok = (m) => m.y > 420 && m.y < map.finishY - 420;
+      const cy = (this.contender() || {}).y || 0;
+      let pool = this.active.filter((m) => ok(m) && Math.abs(m.y - cy) < 380);
+      if (!pool.length) pool = this.active.filter(ok);
+      if (!pool.length) { this.catCd = 1; return; }
+      const m = pool[Math.floor(this.rng() * pool.length)];
+      this.active.splice(this.active.indexOf(m), 1);
+      this.held.push(m);
+      m.vx = 0; m.vy = 0;
+      const side = m.x < map.W / 2 ? -1 : 1;
+      const ox = side < 0 ? -80 : map.W + 80, oy = m.y - 40;
+      this.cat = {
+        m, t: 0, side, gx: m.x, gy: m.y, ox, oy, px: ox, py: oy,
+        dropX: 150 + this.rng() * 220, dropY: Math.max(330, m.y - 700),
+      };
+      this.catCount++;
+      this.events.push({ type: 'cat', m, x: m.x, y: m.y });
     }
 
     /* 펑! 반경 안의 다른 구슬을 바깥으로 밀어낸다 (가까울수록 세게) */
@@ -870,13 +936,13 @@ legend { padding: 0; margin-bottom: 6px; }
 
     /* 결승선에 가까운 순서 (도착한 구슬 먼저) */
     standings() {
-      return this.finished.concat(this.active.slice().sort((a, b) => b.y - a.y));
+      return this.finished.concat(this.active.concat(this.held).sort((a, b) => b.y - a.y));
     }
 
     /* 지금 당첨 자리에 있는 구슬 */
     contender() {
       if (this.winner) return this.winner;
-      const act = this.active.slice().sort((a, b) => b.y - a.y);
+      const act = this.active.concat(this.held).sort((a, b) => b.y - a.y);
       if (!act.length) return null;
       const idx = this.targetRank - 1 - this.finished.length;
       return act[Math.max(0, Math.min(act.length - 1, idx))];
@@ -885,7 +951,7 @@ legend { padding: 0; margin-bottom: 6px; }
     /* 당첨이 갈리는 순간이 코앞인지 (슬로모션용) */
     decisive() {
       if (this.winner || !this.started) return false;
-      const act = this.active.slice().sort((a, b) => b.y - a.y);
+      const act = this.active.concat(this.held).sort((a, b) => b.y - a.y);
       const deciding = this.targetRank === this.N ? this.N - 1 : this.targetRank;
       const k = deciding - this.finished.length - 1;
       if (k < 0 || k >= act.length) return false;
@@ -922,7 +988,7 @@ legend { padding: 0; margin-bottom: 6px; }
     shake: $('shakeBtn'), shakeCd: $('shakeCd'), speed: $('speedBtn'), sound: $('soundBtn'),
     soundLabel: $('soundLabel'), stop: $('stopBtn'), result: $('result'), rEyebrow: $('resultEyebrow'),
     rName: $('resultName'), rMeta: $('resultMeta'), rList: $('resultList'), again: $('againBtn'),
-    skills: $('skills'), edit: $('editBtn'), copy: $('copyBtn'), copySlot: $('copySlot'), ranks: $('ranks'), live: $('live'),
+    skills: $('skills'), cats: $('cats'), edit: $('editBtn'), copy: $('copyBtn'), copySlot: $('copySlot'), ranks: $('ranks'), live: $('live'),
   };
   const modeInputs = Array.from(document.querySelectorAll('input[name="mode"]'));
 
@@ -935,6 +1001,7 @@ legend { padding: 0; margin-bottom: 6px; }
     dmd: tok('--dmd', '#ff922e'), dmdOff: tok('--dmd-off', '#2a190b'), dmdBg: tok('--dmd-bg', '#0b0705'),
     insert: tok('--insert', '#ff4d7a'), insertHi: tok('--insert-hi', '#ff9bb4'), insertLo: tok('--insert-lo', '#b3163e'),
     brass: tok('--brass', '#e6b85c'), ramp: tok('--ramp', '#3cc8b4'), spinner: tok('--spinner', '#6b8cff'),
+    fur: tok('--fur', '#f2a35e'), furDark: tok('--fur-dark', '#b0642a'), bean: tok('--bean', '#ff9fb4'),
     ink: tok('--ink', '#f3eee6'), muted: tok('--muted', '#a39bb2'), line: tok('--line', '#372e45'),
   };
   const FONT_DISPLAY = tok('--font-display', 'sans-serif');
@@ -997,7 +1064,7 @@ legend { padding: 0; margin-bottom: 6px; }
   /* ---------- 상태 ---------- */
   const S = {
     phase: 'setup', entries: [], people: 0, preview: [], topSlotY: 262, rows: 1,
-    mode: 'first', rank: 2, speed: 1, sound: true, skills: true, rings: [], lastSkillMsg: 0,
+    mode: 'first', rank: 2, speed: 1, sound: true, skills: true, cats: true, rings: [], lastSkillMsg: 0,
     race: null, winner: null, cd: null, gate: 0,
     camY: 300, manualUntil: 0, slow: 1, slowUsed: 0, slowUntil: 0, acc: 0,
     shakeT: 0, shakeReady: 0, particles: [], confetti: [],
@@ -1044,6 +1111,7 @@ legend { padding: 0; margin-bottom: 6px; }
       count(go) { if (go) tone(1046.5, 0.34, 'square', 0.07); else tone(659.25, 0.12, 'square', 0.06); },
       shuffle() { for (let i = 0; i < 6; i++) tone(520 + i * 90, 0.05, 'triangle', 0.05, 0, i * 0.09); },
       shake() { tone(150, 0.28, 'sawtooth', 0.05, 55); },
+      meow() { tone(760, 0.14, 'triangle', 0.08, 1150); tone(1150, 0.32, 'triangle', 0.07, 560, 0.13); },
       pop() { tone(220, 0.22, 'sine', 0.22, 60); tone(1400, 0.06, 'square', 0.035, 500); },
       win() {
         [523.25, 659.25, 783.99, 1046.5, 783.99, 1046.5, 1318.51]
@@ -1472,6 +1540,7 @@ legend { padding: 0; margin-bottom: 6px; }
     store.set('rank', S.rank);
     store.set('sound', S.sound);
     store.set('skills', S.skills);
+    store.set('cats', S.cats);
   }
 
   /* ---------- 진행 단계 ---------- */
@@ -1548,7 +1617,7 @@ legend { padding: 0; margin-bottom: 6px; }
       const p = S.preview[perm[k]];
       entries.push({ name: p.name, color: p.color, key: p.key });
     }
-    S.race = new E.Race(MAP, entries, { mode: S.mode, rank: S.rank, seed: rand32(), skills: S.skills });
+    S.race = new E.Race(MAP, entries, { mode: S.mode, rank: S.rank, seed: rand32(), skills: S.skills, cats: S.cats });
     S.race.release();
     S.phase = 'race'; S.cd = null; S.gate = 1; S.lastUi = 0;
     setPhaseUI();
@@ -1601,6 +1670,10 @@ legend { padding: 0; margin-bottom: 6px; }
       else if (ev.type === 'bump') {
         if (ev.y > y0 && ev.y < y1) { Sound.bump(); sparks(ev.x, ev.y, ev.kind === 'bumper' ? C.insert : C.dmd, reduceMotion ? 2 : 5); }
       } else if (ev.type === 'skill') onSkill(ev, y0, y1, now);
+      else if (ev.type === 'cat') onCat(ev, now);
+      else if (ev.type === 'catdrop') {
+        if (ev.y > y0 && ev.y < y1) { S.rings.push({ x: ev.x, y: ev.y, color: C.fur, t: 0 }); sparks(ev.x, ev.y, C.fur, 8); }
+      }
       else if (ev.type === 'finish') onFinish(ev.m);
       else if (ev.type === 'winner') onWinner(ev.m, now);
     }
@@ -1618,6 +1691,11 @@ legend { padding: 0; margin-bottom: 6px; }
       S.lastSkillMsg = now;
       DMD.flash(`펑! ${ev.m.name}`, 0.8);
     }
+  }
+
+  function onCat(ev, now) {
+    Sound.meow();
+    if (!S.winner) { DMD.flash(`냥! ${ev.m.name} 납치`, 1.2); S.lastSkillMsg = now; }
   }
 
   function onFinish(m) {
@@ -1955,6 +2033,32 @@ legend { padding: 0; margin-bottom: 6px; }
     fx.globalAlpha = 1;
   }
 
+  /* 고양이 앞발: 벽 밖에서 팔이 뻗어 나와 구슬을 쥐고 간다 */
+  function drawCat() {
+    const c = S.race && S.race.cat;
+    if (!c || c.t >= 1.15) return;
+    const ang = Math.atan2(c.py - c.oy, c.px - c.ox);
+    fx.lineCap = 'round';
+    fx.strokeStyle = 'rgba(0, 0, 0, 0.35)'; fx.lineWidth = 40;
+    fx.beginPath(); fx.moveTo(c.ox + 4, c.oy + 6); fx.lineTo(c.px + 4, c.py + 6); fx.stroke();
+    fx.strokeStyle = C.furDark; fx.lineWidth = 38;
+    fx.beginPath(); fx.moveTo(c.ox, c.oy); fx.lineTo(c.px, c.py); fx.stroke();
+    fx.strokeStyle = C.fur; fx.lineWidth = 32; fx.stroke();
+    // 줄무늬
+    fx.save(); fx.translate(c.px, c.py); fx.rotate(ang);
+    fx.strokeStyle = C.furDark; fx.lineWidth = 5;
+    const len = Math.hypot(c.px - c.ox, c.py - c.oy);
+    for (let d = 40; d < len - 10; d += 26) { fx.beginPath(); fx.moveTo(-d, -12); fx.lineTo(-d - 6, 12); fx.stroke(); }
+    // 발바닥
+    fx.fillStyle = C.fur; circle(6, 0, 25); fx.fill();
+    fx.strokeStyle = C.furDark; fx.lineWidth = 2.5; fx.stroke();
+    const grab = c.t > 0.45;
+    fx.fillStyle = C.bean;
+    for (const [bx, by] of [[22, -15], [27, -4], [27, 7], [22, 17]]) { circle(bx - (grab ? 6 : 0), by * (grab ? 0.8 : 1), 5); fx.fill(); }
+    fx.beginPath(); fx.ellipse(6, 1, 9, 11, 0, 0, TAU); fx.fill();
+    fx.restore();
+  }
+
   function drawParticles() {
     for (const p of S.particles) {
       fx.globalAlpha = Math.max(0, 1 - p.t / p.life);
@@ -1989,7 +2093,7 @@ legend { padding: 0; margin-bottom: 6px; }
   }
 
   function drawFocus(m, t) {
-    if (!m || m.finished) return;
+    if (!m || m.finished || m.hidden) return;
     const x = sx(m.x), y = sy(m.y), rs = R * L.scale, won = !!S.winner;
     const pulse = reduceMotion ? 0.5 : 0.5 + 0.5 * Math.sin(t * 8);
     const col = won ? C.insert : C.dmd;
@@ -2051,6 +2155,11 @@ legend { padding: 0; margin-bottom: 6px; }
     const list = marblesForDraw();
     drawRings();
     drawMarbles(list, y0, y1);
+    if (S.race && S.race.cat) {
+      drawCat();
+      const held = S.race.held.filter((m) => !m.hidden);
+      drawMarbles(held, y0, y1);
+    }
     drawParticles();
     fx.setTransform(L.dpr, 0, 0, L.dpr, 0, 0);
     const focus = currentFocus();
@@ -2131,6 +2240,7 @@ legend { padding: 0; margin-bottom: 6px; }
     });
     ui.start.addEventListener('click', startRace);
     ui.skills.addEventListener('change', () => { S.skills = ui.skills.checked; save(); });
+    ui.cats.addEventListener('change', () => { S.cats = ui.cats.checked; save(); });
 
     ui.shake.addEventListener('click', () => {
       const now = performance.now();
@@ -2235,7 +2345,7 @@ legend { padding: 0; margin-bottom: 6px; }
 
     try {
       const hot = window.claude && window.claude.hot;
-      if (hot && hot.snapshot) hot.snapshot(() => ({ names: ui.names.value, mode: S.mode, rank: S.rank, sound: S.sound, skills: S.skills }));
+      if (hot && hot.snapshot) hot.snapshot(() => ({ names: ui.names.value, mode: S.mode, rank: S.rank, sound: S.sound, skills: S.skills, cats: S.cats }));
     } catch (e) { /* 미리보기 밖에서는 없음 */ }
   }
 
@@ -2250,6 +2360,8 @@ legend { padding: 0; margin-bottom: 6px; }
     S.sound = snd !== false;
     S.skills = (data.skills != null ? data.skills : store.get('skills', true)) !== false;
     ui.skills.checked = S.skills;
+    S.cats = (data.cats != null ? data.cats : store.get('cats', true)) !== false;
+    ui.cats.checked = S.cats;
     modeInputs.forEach((r) => { r.checked = r.value === S.mode; });
     ui.rankRow.hidden = S.mode !== 'rank';
     ui.rankNum.value = String(S.rank);
