@@ -625,7 +625,8 @@ legend { padding: 0; margin-bottom: 6px; }
    *   ['r', x, y, arms, len, w]  풍차 (w: 초당 회전, 음수면 반대 방향)
    *   ['w', ax, ay, bx, by]      벽(경사로)
    */
-  const MAP_W = 520, MAP_H = 3540;
+  const MAP_W = 520;
+  const END_DEFAULT = 3100, END_MAX = 8100;
   const EDIT = { x0: 24, x1: 496, y0: 310, y1: 3075 };   // 꾸밀 수 있는 영역
   const MAX_ITEMS = 600;
 
@@ -649,14 +650,93 @@ legend { padding: 0; margin-bottom: 6px; }
     return L;
   }
 
+  /* 롱 코스: 기본 코스의 두 배 가까운 길이, 구역마다 성격이 다르다 */
+  function longLayout() {
+    const L = [['h', 6100]];
+    const T = (y, name) => L.push(['t', y, name]);
+    // 1. 핀 비
+    T(320, '핀 비');
+    for (let i = 0; i < 12; i++) {
+      const y = 340 + i * 46;
+      if (i % 2 === 0) { for (let j = 0; j < 8; j++) L.push(['p', 50 + j * 60, y]); }
+      else { for (let j = 0; j < 7; j++) L.push(['p', 80 + j * 60, y]); L.push(['p', 20, y, 9], ['p', 500, y, 9]); }
+    }
+    // 2. 범퍼 지그재그
+    T(900, '범퍼 지그재그');
+    L.push(['b', 140, 980, 22, 600], ['b', 380, 1060, 22, 600], ['b', 260, 1160, 24, 620],
+      ['b', 110, 1250, 22, 600], ['b', 410, 1250, 22, 600], ['b', 260, 1350, 24, 620],
+      ['b', 160, 1460, 22, 600], ['b', 360, 1460, 22, 600],
+      ['b', 20, 1110, 12, 400], ['b', 500, 1110, 12, 400], ['b', 20, 1370, 12, 400], ['b', 500, 1370, 12, 400]);
+    {
+      const bs = L.filter((it) => it[0] === 'b' && it[2] > 900 && it[2] < 1560);
+      [1020, 1110, 1200, 1300, 1400, 1520].forEach((y, i) => {
+        for (let x = 70 + (i % 2) * 38; x <= 450; x += 76) {
+          if (bs.every((it) => Math.hypot(it[1] - x, it[2] - y) > it[3] + 40)) L.push(['p', x, y]);
+        }
+      });
+    }
+    // 3. 풍차 탑
+    T(1560, '풍차 탑');
+    L.push(['r', 260, 1640, 2, 110, 3.0], ['r', 110, 1800, 4, 60, -3.2], ['r', 410, 1800, 4, 60, 3.2],
+      ['r', 260, 1950, 3, 88, -2.2], ['r', 130, 2120, 2, 78, 2.8], ['r', 390, 2120, 2, 78, -2.8],
+      ['r', 260, 2270, 4, 66, 3.6]);
+    L.push(['p', 60, 1960], ['p', 460, 1960], ['p', 260, 2100], ['p', 60, 2260], ['p', 460, 2260]);
+    // 4. 급경사 계단 (경사로 끝마다 범퍼가 반대편으로 튕겨 줌)
+    T(2400, '급경사');
+    L.push(['w', 12, 2430, 300, 2530], ['b', 400, 2610, 20, 620],
+      ['w', 508, 2670, 220, 2770], ['b', 120, 2850, 20, 620],
+      ['w', 12, 2910, 300, 3010], ['b', 400, 3090, 20, 620],
+      ['w', 508, 3150, 220, 3250]);
+    // 5. 갈림길
+    T(3320, '갈림길');
+    L.push(['p', 260, 3336, 7], ['w', 260, 3340, 150, 3430], ['w', 260, 3340, 370, 3430],
+      ['r', 110, 3540, 3, 58, 2.6], ['r', 410, 3540, 3, 58, -2.6],
+      ['w', 12, 3650, 200, 3730], ['w', 508, 3650, 320, 3730],
+      ['r', 260, 3845, 2, 70, -3.2], ['p', 90, 3900], ['p', 430, 3900]);
+    // 6. 파칭코
+    T(3980, '파칭코');
+    const kick = [[160, 4150], [360, 4310], [160, 4470]];
+    for (let i = 0; i < 16; i++) {
+      const y = 4000 + i * 40;
+      const xs = [];
+      if (i % 2 === 0) { for (let j = 0; j < 9; j++) xs.push(60 + j * 50); }
+      else { for (let j = 0; j < 8; j++) xs.push(85 + j * 50); L.push(['p', 20, y, 9], ['p', 500, y, 9]); }
+      for (const x of xs) if (!kick.some(([kx, ky]) => Math.hypot(kx - x, ky - y) < 40)) L.push(['p', x, y]);
+    }
+    for (const [x, y] of kick) L.push(['b', x, y, 14, 460]);
+    // 7. 스위치백 (경사로 위에서 도는 막대가 구슬을 후려침)
+    T(4700, '스위치백');
+    L.push(['w', 12, 4720, 420, 4830], ['r', 260, 4885, 2, 55, 3.0],
+      ['w', 508, 4930, 100, 5040], ['r', 260, 5095, 2, 55, -3.0],
+      ['w', 12, 5140, 420, 5250], ['r', 260, 5305, 2, 55, 3.0],
+      ['w', 508, 5350, 100, 5460], ['p', 460, 4890], ['p', 60, 5100], ['p', 460, 5310]);
+    // 8. 범퍼 방
+    T(5500, '범퍼 방');
+    L.push(['b', 260, 5590, 26, 650], ['b', 180, 5700, 22, 600], ['b', 340, 5700, 22, 600], ['b', 260, 5810, 20, 560],
+      ['b', 20, 5660, 12, 400], ['b', 500, 5660, 12, 400], ['b', 20, 5900, 12, 400], ['b', 500, 5900, 12, 400]);
+    for (let x = 70; x <= 450; x += 60) L.push(['p', x, 5980]);
+    return L;
+  }
+
   /* 밖에서 들어온 레이아웃(공유 코드 등)을 안전한 범위로 다듬는다 */
+  /* 코스 길이: ['h', 끝 y] (기본 3100, 최대 8100) */
+  function layoutEnd(items) {
+    const h = Array.isArray(items) ? items.find((it) => Array.isArray(it) && it[0] === 'h') : null;
+    const v = h ? Number(h[1]) : END_DEFAULT;
+    return isFinite(v) ? Math.round(Math.max(END_DEFAULT, Math.min(END_MAX, v))) : END_DEFAULT;
+  }
+  function editBox(end) { return { x0: EDIT.x0, x1: EDIT.x1, y0: EDIT.y0, y1: end - 25 }; }
+
   function cleanLayout(items) {
     const out = [];
+    const end = layoutEnd(items), box = editBox(end);
+    if (end !== END_DEFAULT) out.push(['h', end]);
     const n = (v, a, b, d) => { v = Number(v); if (!isFinite(v)) v = d; return Math.round(Math.max(a, Math.min(b, v)) * 10) / 10; };
-    const X = (v) => n(v, 12, 508, 260), Y = (v) => n(v, EDIT.y0, EDIT.y1, 1000);
+    const X = (v) => n(v, 12, 508, 260), Y = (v) => n(v, box.y0, box.y1, 1000);
     for (const it of Array.isArray(items) ? items : []) {
       if (!Array.isArray(it) || out.length >= MAX_ITEMS) continue;
       const t = it[0];
+      if (t === 't') { out.push(['t', Y(it[1]), String(it[2] || '').slice(0, 10)]); continue; }
       if (t === 'p') out.push(it[3] != null ? ['p', X(it[1]), Y(it[2]), n(it[3], 4, 12, 6)] : ['p', X(it[1]), Y(it[2])]);
       else if (t === 'b') out.push(['b', X(it[1]), Y(it[2]), n(it[3], 10, 34, 22), n(it[4], 200, 800, 560)]);
       else if (t === 'r') out.push(['r', X(it[1]), Y(it[2]), Math.round(n(it[3], 2, 4, 4)), n(it[4], 30, 120, 66), n(it[5], -4, 4, 2)]);
@@ -669,9 +749,10 @@ legend { padding: 0; margin-bottom: 6px; }
   }
 
   function buildMap(layout) {
-    const W = MAP_W, HH = MAP_H;
     const custom = Array.isArray(layout);
     const items = custom ? cleanLayout(layout) : defaultLayout();
+    const end = custom ? layoutEnd(items) : END_DEFAULT;
+    const W = MAP_W, HH = end + 440;
     const segs = [], circs = [], rotors = [];
 
     const seg = (ax, ay, bx, by, t, kind, e, f) => {
@@ -689,8 +770,8 @@ legend { padding: 0; margin-bottom: 6px; }
 
     // 고정 틀: 바깥 벽
     seg(12, 0, 508, 0, 8);
-    seg(12, 0, 12, 3100, 8);
-    seg(508, 0, 508, 3100, 8);
+    seg(12, 0, 12, end, 8);
+    seg(508, 0, 508, end, 8);
 
     // 꾸민 장애물
     for (const it of items) {
@@ -701,20 +782,25 @@ legend { padding: 0; margin-bottom: 6px; }
     }
 
     // 고정 틀: 결승 깔때기
-    seg(12, 3100, 195, 3330, 8);
-    seg(508, 3100, 325, 3330, 8);
-    rotor(260, 3245, 2, 52, 3.4, true);
-    seg(195, 3330, 195, 3500, 8);
-    seg(325, 3330, 325, 3500, 8);
+    seg(12, end, 195, end + 230, 8);
+    seg(508, end, 325, end + 230, 8);
+    rotor(260, end + 145, 2, 52, 3.4, true);
+    seg(195, end + 230, 195, end + 400, 8);
+    seg(325, end + 230, 325, end + 400, 8);
+
+    // 구역 이름: ['t', y, '이름'] 항목에서
+    const labels = items.filter((it) => it[0] === 't').sort((a, b) => a[1] - b[1]);
+    const secs = labels.map((it, i) => ({ key: 's' + i, label: it[2], y0: it[1], y1: i + 1 < labels.length ? labels[i + 1][1] : end - 20 }));
+    secs.push({ key: 'final', label: '결승', y0: end - 20, y1: HH });
 
     const map = {
       W, H: HH, R, segs, circs, rotors, custom, layout: items,
-      finishY: 3440,
+      finishY: end + 340,
       gateY: 284,
       spawn: { x0: 20, x1: 500, yBottom: 262 },
       chute: { x0: 195, x1: 325 },
-      edit: EDIT,
-      sections: custom ? [{ key: 'final', label: '결승', y0: 3080, y1: 3540 }] : [
+      edit: editBox(end),
+      sections: custom ? secs : [
         { key: 'forest', label: '핀 숲', y0: 290, y1: 1040 },
         { key: 'mill', label: '풍차', y0: 1040, y1: 1760 },
         { key: 'zigzag', label: '지그재그', y0: 1760, y1: 2495 },
@@ -722,7 +808,7 @@ legend { padding: 0; margin-bottom: 6px; }
         { key: 'final', label: '결승', y0: 3080, y1: 3540 },
       ],
       // 장식용 화살표 램프 (물리에는 영향 없음)
-      inserts: custom ? [{ x: 260, y: 3360 }, { x: 260, y: 3392 }] : [
+      inserts: custom ? [{ x: 260, y: end + 260 }, { x: 260, y: end + 292 }] : [
         { x: 200, y: 1050 }, { x: 260, y: 1062 }, { x: 320, y: 1050 },
         { x: 200, y: 1745 }, { x: 260, y: 1757 }, { x: 320, y: 1745 },
         { x: 330, y: 2540 }, { x: 380, y: 2552 }, { x: 430, y: 2540 },
@@ -1177,7 +1263,7 @@ legend { padding: 0; margin-bottom: 6px; }
     }
   }
 
-  const api = { R, STEP, SKILL_RADIUS: 110, EDIT, MAX_ITEMS, TIME_LIMIT, defaultLayout, cleanLayout, encodeLayout, decodeLayout, MAX_MARBLES, buildMap, spawnSlots, parseEntries, Race, mulberry32 };
+  const api = { R, STEP, SKILL_RADIUS: 110, EDIT, MAX_ITEMS, TIME_LIMIT, defaultLayout, longLayout, cleanLayout, encodeLayout, decodeLayout, MAX_MARBLES, buildMap, spawnSlots, parseEntries, Race, mulberry32 };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PinballEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -2428,6 +2514,12 @@ legend { padding: 0; margin-bottom: 6px; }
 
   const Courses = (() => {
     let list = [], cur = 'default';
+    // 기본으로 들어 있는 코스 (편집하면 복사본으로 저장)
+    const BUILTIN = [
+      { id: 'default', name: '기본 코스', layout: undefined },
+      { id: 'long', name: '롱 코스 · 다이나믹', layout: E.longLayout() },
+    ];
+    const builtin = (id) => BUILTIN.find((b) => b.id === id);
     const read = () => {
       const v = store.get('maps', []);
       return Array.isArray(v) ? v.filter((m) => m && m.id && Array.isArray(m.layout)) : [];
@@ -2439,13 +2531,13 @@ legend { padding: 0; margin-bottom: 6px; }
       const add = (value, text) => {
         const o = document.createElement('option'); o.value = value; o.textContent = text; ui.course.append(o);
       };
-      add('default', '기본 코스');
+      for (const b of BUILTIN) add(b.id, b.name);
       for (const m of list) add(m.id, m.name);
-      ui.course.value = find(cur) ? cur : 'default';
+      ui.course.value = find(cur) || builtin(cur) ? cur : 'default';
     }
     function select(id) {
-      cur = find(id) ? id : 'default';
-      setMap(cur === 'default' ? undefined : find(cur).layout);
+      cur = find(id) || builtin(id) ? id : 'default';
+      setMap(builtin(cur) ? builtin(cur).layout : find(cur).layout);
       store.set('course', cur);
       render();
       if (S.phase === 'setup') { S.preview = []; syncPreview(); }
@@ -2469,7 +2561,8 @@ legend { padding: 0; margin-bottom: 6px; }
       wire() {
         ui.course.addEventListener('change', () => select(ui.course.value));
         ui.editCourse.addEventListener('click', () => {
-          if (cur === 'default') Editor.open(null, nextName(), E.defaultLayout(), '기본 코스를 복사했어요. 고친 뒤 저장하면 새 코스로 추가돼요.');
+          const b = builtin(cur);
+          if (b) Editor.open(null, nextName(), b.layout || E.defaultLayout(), `"${b.name}" 복사본이에요. 고친 뒤 저장하면 새 코스로 추가돼요.`);
           else { const m = find(cur); Editor.open(m.id, m.name, m.layout); }
         });
         ui.newCourse.addEventListener('click', () => Editor.open(null, nextName(), []));
