@@ -431,6 +431,7 @@ legend { padding: 0; margin-bottom: 6px; }
   const STALL_T = 3.0;       // 이 시간 동안 아래로 못 가면 살짝 튕겨줌
   const HIT_MIN = 150;       // 효과음/반짝임을 낼 최소 충돌 속도
   const MAX_MARBLES = 200;
+  const CAT_PRE = 0.9;       // 고양이 손 예고 시간 (카메라가 그쪽으로 갈 시간)
 
   function mulberry32(seed) {
     let a = seed >>> 0;
@@ -849,9 +850,25 @@ legend { padding: 0; margin-bottom: 6px; }
       if (c) {
         c.t += H;
         const m = c.m;
+        if (c.t < 0) {                          // 예고: 벽 틈으로 앞발을 살짝 내밀고 구슬을 노려봄
+          const k = ease(Math.min(1, (c.t + CAT_PRE) / 0.35));
+          const wall = c.side < 0 ? 4 : map.W - 4;
+          c.gx = m.x; c.gy = m.y; c.oy = m.y - 40;
+          c.px = c.ox + (wall + c.side * -26 - c.ox) * k; c.py = c.oy + Math.sin(c.t * 18) * 4;
+          return;
+        }
+        if (!c.grabbed) {                       // 낚아채기 시작
+          c.grabbed = true; c.sx = c.px; c.sy = c.py;
+          c.gx = m.x; c.gy = m.y;
+          const i = this.active.indexOf(m);
+          if (i >= 0) this.active.splice(i, 1);
+          this.held.push(m);
+          m.vx = 0; m.vy = 0;
+          this.events.push({ type: 'catgrab', m, x: m.x, y: m.y });
+        }
         if (c.t < 0.45) {                       // 앞발이 쭉 뻗어 옴
           const k = ease(c.t / 0.45);
-          c.px = c.ox + (c.gx - c.ox) * k; c.py = c.oy + (c.gy - c.oy) * k;
+          c.px = c.sx + (c.gx - c.sx) * k; c.py = c.sy + (c.gy - c.sy) * k;
           m.x = c.gx; m.y = c.gy;
         } else if (c.t < 1.15) {                // 구슬을 쥐고 벽 밖으로
           const k = ease((c.t - 0.45) / 0.7);
@@ -879,13 +896,10 @@ legend { padding: 0; margin-bottom: 6px; }
       if (!pool.length) pool = this.active.filter(ok);
       if (!pool.length) { this.catCd = 1; return; }
       const m = pool[Math.floor(this.rng() * pool.length)];
-      this.active.splice(this.active.indexOf(m), 1);
-      this.held.push(m);
-      m.vx = 0; m.vy = 0;
       const side = m.x < map.W / 2 ? -1 : 1;
       const ox = side < 0 ? -80 : map.W + 80, oy = m.y - 40;
       this.cat = {
-        m, t: 0, side, gx: m.x, gy: m.y, ox, oy, px: ox, py: oy,
+        m, t: -CAT_PRE, side, grabbed: false, gx: m.x, gy: m.y, ox, oy, px: ox, py: oy,
         dropX: 150 + this.rng() * 220, dropY: Math.max(330, m.y - 700),
       };
       this.catCount++;
@@ -1646,6 +1660,7 @@ legend { padding: 0; margin-bottom: 6px; }
     // 당첨이 갈리기 직전 접전이면 잠깐 느리게 (조건이 풀려도 1초는 유지)
     let target = 1;
     if (S.phase === 'done') target = 0.6;
+    else if (race.cat && race.cat.t < 1.15) target = 0.6;   // 고양이 장면은 살짝 느리게
     else if (!reduceMotion && S.slowUsed < 5) {
       if (race.decisive()) S.slowUntil = now + 1000;
       if (now < S.slowUntil) target = 0.4;
@@ -1671,7 +1686,9 @@ legend { padding: 0; margin-bottom: 6px; }
         if (ev.y > y0 && ev.y < y1) { Sound.bump(); sparks(ev.x, ev.y, ev.kind === 'bumper' ? C.insert : C.dmd, reduceMotion ? 2 : 5); }
       } else if (ev.type === 'skill') onSkill(ev, y0, y1, now);
       else if (ev.type === 'cat') onCat(ev, now);
+      else if (ev.type === 'catgrab') onCatGrab(ev, now);
       else if (ev.type === 'catdrop') {
+        S.catFollow = { m: ev.m, until: now + 900 };
         if (ev.y > y0 && ev.y < y1) { S.rings.push({ x: ev.x, y: ev.y, color: C.fur, t: 0 }); sparks(ev.x, ev.y, C.fur, 8); }
       }
       else if (ev.type === 'finish') onFinish(ev.m);
@@ -1694,8 +1711,11 @@ legend { padding: 0; margin-bottom: 6px; }
   }
 
   function onCat(ev, now) {
+    if (!S.winner) { DMD.flash('고양이 출몰!', 0.9); S.lastSkillMsg = now; }
+  }
+  function onCatGrab(ev, now) {
     Sound.meow();
-    if (!S.winner) { DMD.flash(`냥! ${ev.m.name} 납치`, 1.2); S.lastSkillMsg = now; }
+    if (!S.winner) { DMD.flash(`냥! ${ev.m.name} 납치`, 1.3); S.lastSkillMsg = now; }
   }
 
   function onFinish(m) {
@@ -1847,9 +1867,14 @@ legend { padding: 0; margin-bottom: 6px; }
       const c = currentFocus();
       if (c) target = (c.finished ? MAP.finishY : c.y) + (c.finished ? 0 : clamp(c.vy * 0.12, -30, 110));
     }
+    // 고양이 손이 나오면 잠깐 그쪽을 비추고(낚아채기 → 다시 떨어뜨리는 곳), 끝나면 당첨 후보로 돌아감
+    let rate = S.phase === 'race' ? 3.2 : 4.5;
+    const cat = S.race && !S.winner && S.race.cat;
+    if (cat) { target = cat.t < 1.15 ? cat.gy : cat.dropY; rate = 5; }
+    else if (S.catFollow && now < S.catFollow.until && !S.winner) { target = S.catFollow.m.y; rate = 5; }
     const manual = now < S.manualUntil;
     if (!manual && target != null) {
-      S.camY += (target - S.camY) * (1 - Math.exp(-dt * (S.phase === 'race' ? 3.2 : 4.5)));
+      S.camY += (target - S.camY) * (1 - Math.exp(-dt * rate));
     }
     clampCam();
     if (ui.follow.hidden === manual) {
