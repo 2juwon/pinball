@@ -828,7 +828,7 @@ legend { padding: 0; margin-bottom: 6px; }
 
     /* 펑! 반경 안의 다른 구슬을 바깥으로 밀어낸다 (가까울수록 세게) */
     blast(m) {
-      const RAD = 85, POW = 520;
+      const RAD = 110, POW = 820;
       for (const o of this.active) {
         if (o === m) continue;
         const dx = o.x - m.x, dy = o.y - m.y, d = Math.hypot(dx, dy);
@@ -896,7 +896,7 @@ legend { padding: 0; margin-bottom: 6px; }
     }
   }
 
-  const api = { R, STEP, SKILL_RADIUS: 85, MAX_MARBLES, buildMap, spawnSlots, parseEntries, Race, mulberry32 };
+  const api = { R, STEP, SKILL_RADIUS: 110, MAX_MARBLES, buildMap, spawnSlots, parseEntries, Race, mulberry32 };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PinballEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);
