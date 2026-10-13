@@ -900,7 +900,9 @@ legend { padding: 0; margin-bottom: 6px; }
       const ox = side < 0 ? -80 : map.W + 80, oy = m.y - 40;
       this.cat = {
         m, t: -CAT_PRE, side, grabbed: false, gx: m.x, gy: m.y, ox, oy, px: ox, py: oy,
-        dropX: 150 + this.rng() * 220, dropY: Math.max(330, m.y - 700),
+        // 잡힌 자리에서 조금 위(약 200~300)로 다시 떨어뜨림
+        dropX: Math.max(70, Math.min(map.W - 70, m.x + (this.rng() - 0.5) * 80)),
+        dropY: Math.max(330, m.y - 200 - this.rng() * 100),
       };
       this.catCount++;
       this.events.push({ type: 'cat', m, x: m.x, y: m.y });
