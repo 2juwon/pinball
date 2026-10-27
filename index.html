@@ -589,6 +589,9 @@ legend { padding: 0; margin-bottom: 6px; }
   const MAX_MARBLES = 1000;
   const TOP = -1400;         // 출발 칸 천장 (구슬이 많으면 위로 여러 줄 쌓인다)
   const CAT_PRE = 0.9;
+  const CAT_REACH = 0.3;     // 고양이 손: 앞발이 구슬까지 뻗는 시간
+  const CAT_OUT = 0.75;      // 구슬을 쥐고 벽 밖으로 나가는 게 끝나는 시각
+  const CAT_BACK = 0.95;     // 다시 떨어뜨리는 시각 (예전 1.9초 → 빨리 돌려줌)
   const CAT_NEAR = 72;       // 고양이 손: 이 거리 안에 있는 구슬을 '같은 무리'로 셈
   const CAT_CROWD = 2;       // 주변에 구슬이 이만큼 이상 있어야 무리로 봄 (자기 포함 3개)
   const MAX_HOLES = 8;
@@ -1241,19 +1244,19 @@ legend { padding: 0; margin-bottom: 6px; }
           m.vx = 0; m.vy = 0;
           this.events.push({ type: 'catgrab', m, x: m.x, y: m.y });
         }
-        if (c.t < 0.45) {                       // 앞발이 쭉 뻗어 옴
-          const k = ease(c.t / 0.45);
+        if (c.t < CAT_REACH) {                  // 앞발이 쭉 뻗어 옴
+          const k = ease(c.t / CAT_REACH);
           c.px = c.sx + (c.gx - c.sx) * k; c.py = c.sy + (c.gy - c.sy) * k;
           m.x = c.gx; m.y = c.gy;
-        } else if (c.t < 1.15) {                // 구슬을 쥐고 벽 밖으로
-          const k = ease((c.t - 0.45) / 0.7);
+        } else if (c.t < CAT_OUT) {             // 구슬을 쥐고 벽 밖으로
+          const k = ease((c.t - CAT_REACH) / (CAT_OUT - CAT_REACH));
           c.px = c.gx + (c.ox - c.gx) * k; c.py = c.gy + (c.oy - 150 - c.gy) * k;
           m.x = c.px; m.y = c.py;
-        } else if (c.t < 1.9) {                 // 잠깐 사라짐
+        } else if (c.t < CAT_BACK) {            // 잠깐 사라짐
           m.hidden = true; c.px = c.ox; c.py = c.oy - 150;
         } else {                                // 위쪽 코스에 다시 떨어뜨림
           m.hidden = false; m.catTarget = false;
-          m.x = c.dropX; m.y = c.dropY; m.vx = 0; m.vy = 60;
+          m.x = c.dropX; m.y = c.dropY; m.vx = 0; m.vy = 300;   // 아래로 힘 있게 떨어뜨림
           m.best = m.y; m.stall = 0;
           this.held.splice(this.held.indexOf(m), 1);
           this.active.push(m);
@@ -1298,9 +1301,9 @@ legend { padding: 0; margin-bottom: 6px; }
       const ox = side < 0 ? -80 : map.W + 80, oy = m.y - 40;
       this.cat = {
         m, t: -CAT_PRE, side, grabbed: false, gx: m.x, gy: m.y, ox, oy, px: ox, py: oy,
-        // 잡힌 자리에서 조금 위(약 200~300)로 다시 떨어뜨림
+        // 잡힌 자리에서 조금 위(약 140~220)로 다시 떨어뜨림
         dropX: Math.max(70, Math.min(map.W - 70, m.x + (this.rng() - 0.5) * 80)),
-        dropY: Math.max(330, m.y - 200 - this.rng() * 100),
+        dropY: Math.max(330, m.y - 140 - this.rng() * 80),
       };
       this.catCount++;
       this.events.push({ type: 'cat', m, x: m.x, y: m.y });
@@ -1376,7 +1379,7 @@ legend { padding: 0; margin-bottom: 6px; }
     }
   }
 
-  const api = { TOP, R, STEP, SKILL_RADIUS: 110, EDIT, MAX_ITEMS, MAX_HOLES, HOLE_PULL, TIME_LIMIT, defaultLayout, longLayout, cleanLayout, encodeLayout, decodeLayout, MAX_MARBLES, buildMap, spawnSlots, parseEntries, Race, mulberry32 };
+  const api = { TOP, R, STEP, SKILL_RADIUS: 110, EDIT, MAX_ITEMS, MAX_HOLES, HOLE_PULL, TIME_LIMIT, CAT_REACH, CAT_OUT, defaultLayout, longLayout, cleanLayout, encodeLayout, decodeLayout, MAX_MARBLES, buildMap, spawnSlots, parseEntries, Race, mulberry32 };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PinballEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -2085,7 +2088,7 @@ legend { padding: 0; margin-bottom: 6px; }
     // 당첨이 갈리기 직전 접전이면 잠깐 느리게 (조건이 풀려도 1초는 유지)
     let target = 1;
     if (S.phase === 'done') target = 0.6;
-    else if (race.cat && race.cat.t < 1.15) target = 0.6;   // 고양이 장면은 살짝 느리게
+    else if (race.cat && race.cat.t < E.CAT_OUT) target = 0.6;   // 고양이 장면은 살짝 느리게
     else if (!reduceMotion && S.slowUsed < 5) {
       if (race.decisive()) S.slowUntil = now + 1000;
       if (now < S.slowUntil) target = 0.4;
@@ -2311,7 +2314,7 @@ legend { padding: 0; margin-bottom: 6px; }
     // 고양이 손이 나오면 잠깐 그쪽을 비추고(낚아채기 → 다시 떨어뜨리는 곳), 끝나면 당첨 후보로 돌아감
     let rate = S.phase === 'race' ? 3.2 : 4.5;
     const cat = S.race && !S.winner && S.race.cat;
-    if (cat) { target = cat.t < 1.15 ? cat.gy : cat.dropY; rate = 5; }
+    if (cat) { target = cat.t < E.CAT_OUT ? cat.gy : cat.dropY; rate = 5; }
     else if (S.catFollow && now < S.catFollow.until && !S.winner) { target = S.catFollow.m.y; rate = 5; }
     const manual = now < S.manualUntil;
     if (!manual && target != null) {
@@ -2529,7 +2532,7 @@ legend { padding: 0; margin-bottom: 6px; }
   /* 고양이 앞발: 벽 밖에서 팔이 뻗어 나와 구슬을 쥐고 간다 */
   function drawCat() {
     const c = S.race && S.race.cat;
-    if (!c || c.t >= 1.15) return;
+    if (!c || c.t >= E.CAT_OUT) return;
     const ang = Math.atan2(c.py - c.oy, c.px - c.ox);
     fx.lineCap = 'round';
     fx.strokeStyle = 'rgba(0, 0, 0, 0.35)'; fx.lineWidth = 40;
@@ -2545,7 +2548,7 @@ legend { padding: 0; margin-bottom: 6px; }
     // 발바닥
     fx.fillStyle = C.fur; circle(6, 0, 25); fx.fill();
     fx.strokeStyle = C.furDark; fx.lineWidth = 2.5; fx.stroke();
-    const grab = c.t > 0.45;
+    const grab = c.t > E.CAT_REACH;
     fx.fillStyle = C.bean;
     for (const [bx, by] of [[22, -15], [27, -4], [27, 7], [22, 17]]) { circle(bx - (grab ? 6 : 0), by * (grab ? 0.8 : 1), 5); fx.fill(); }
     fx.beginPath(); fx.ellipse(6, 1, 9, 11, 0, 0, TAU); fx.fill();
