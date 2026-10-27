@@ -589,6 +589,8 @@ legend { padding: 0; margin-bottom: 6px; }
   const MAX_MARBLES = 1000;
   const TOP = -1400;         // 출발 칸 천장 (구슬이 많으면 위로 여러 줄 쌓인다)
   const CAT_PRE = 0.9;
+  const CAT_NEAR = 72;       // 고양이 손: 이 거리 안에 있는 구슬을 '같은 무리'로 셈
+  const CAT_CROWD = 2;       // 주변에 구슬이 이만큼 이상 있어야 무리로 봄 (자기 포함 3개)
   const MAX_HOLES = 8;
   const HOLE_PULL = 78;      // 블랙홀이 끌어당기는 반경
   const HOLE_EAT = 13;       // 이 안으로 들어오면 빨려 들어감
@@ -1262,13 +1264,35 @@ legend { padding: 0; margin-bottom: 6px; }
         return;
       }
       if (this.winner || (this.catCd -= H) > 0) return;
-      // 화면에서 보이도록 지금 당첨 후보 근처 구슬 중에서 무작위로 고른다
+      // 되도록 구슬이 우르르 몰려 있는 무리에서 하나를 낚아챈다 (주변 구슬이 많을수록 잘 뽑힘).
+      // 무리가 없으면 예전처럼 당첨 후보 근처에서 무작위로. 카메라는 고양이 쪽으로 따라감
       const ok = (m) => m.y > 420 && m.y < map.finishY - 420;
-      const cy = (this.contender() || {}).y || 0;
-      let pool = this.active.filter((m) => ok(m) && Math.abs(m.y - cy) < 380);
-      if (!pool.length) pool = this.active.filter(ok);
-      if (!pool.length) { this.catCd = 1; return; }
-      const m = pool[Math.floor(this.rng() * pool.length)];
+      const cand = this.active.filter(ok);
+      if (!cand.length) { this.catCd = 1; return; }
+      const NEAR2 = CAT_NEAR * CAT_NEAR, act = this.active;
+      let total = 0;
+      const wts = cand.map((m) => {
+        let n = 0;
+        for (const o of act) {
+          if (o === m) continue;
+          const dx = o.x - m.x, dy = o.y - m.y;
+          if (dx * dx + dy * dy < NEAR2) n++;
+        }
+        const w = n >= CAT_CROWD ? n * n : 0;
+        total += w;
+        return w;
+      });
+      let m;
+      if (total > 0) {
+        let r = this.rng() * total, i = 0;
+        while ((r -= wts[i]) > 0 && i < cand.length - 1) i++;
+        m = cand[i];
+      } else {
+        const cy = (this.contender() || {}).y || 0;
+        let pool = cand.filter((o) => Math.abs(o.y - cy) < 380);
+        if (!pool.length) pool = cand;
+        m = pool[Math.floor(this.rng() * pool.length)];
+      }
       m.catTarget = true;
       const side = m.x < map.W / 2 ? -1 : 1;
       const ox = side < 0 ? -80 : map.W + 80, oy = m.y - 40;
