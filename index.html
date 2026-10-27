@@ -34,6 +34,8 @@
   --ramp: #3cc8b4;         /* 지그재그 경사로 */
   --spinner: #6b8cff;      /* 풍차 */
   --hole: #9b5cff;         /* 블랙홀 */
+  --boost: #5ee08a;        /* 워프 문: 지름길 */
+  --setback: #ff6a52;      /* 워프 문: 되돌이 */
   --fur: #f2a35e;          /* 고양이 손 */
   --fur-dark: #b0642a;
   --bean: #ff9fb4;
@@ -595,6 +597,9 @@ legend { padding: 0; margin-bottom: 6px; }
   const CAT_NEAR = 72;       // 고양이 손: 이 거리 안에 있는 구슬을 '같은 무리'로 셈
   const CAT_CROWD = 2;       // 주변에 구슬이 이만큼 이상 있어야 무리로 봄 (자기 포함 3개)
   const MAX_HOLES = 8;
+  const MAX_GATES = 6, MAX_PORTALS = 8;
+  const GATE_OPEN = 2.4;     // 수문이 열려 있는 시간 (그 뒤 근처가 비면 다시 닫힘)
+  const PORTAL_R = 16;       // 워프 문 입구 반지름
   const HOLE_PULL = 78;      // 블랙홀이 끌어당기는 반경
   const HOLE_EAT = 13;       // 이 안으로 들어오면 빨려 들어감
   const TIME_LIMIT = 120;    // 이 시간이 지나도 못 들어온 구슬은 순서대로 도착 처리       // 고양이 손 예고 시간 (카메라가 그쪽으로 갈 시간)
@@ -639,6 +644,8 @@ legend { padding: 0; margin-bottom: 6px; }
    *   ['r', x, y, arms, len, w]  풍차 (w: 초당 회전, 음수면 반대 방향)
    *   ['w', ax, ay, bx, by]      벽(경사로)
    *   ['x', x, y]                블랙홀 (열렸다 닫혔다 하며 구슬을 빨아들여 다른 곳으로 보냄)
+   *   ['g', x0, y, x1, wait]     수문 (첫 구슬이 닿으면 wait초 동안 모두 붙잡아 뒀다가 한꺼번에 엶)
+   *   ['o', x, y, tx, ty]        워프 문 (입구에 닿으면 (tx, ty)로 순간 이동 — 아래면 지름길, 위면 되돌이)
    */
   const MAP_W = 520;
   const END_DEFAULT = 3100, END_MAX = 8100;
@@ -735,6 +742,68 @@ legend { padding: 0; margin-bottom: 6px; }
     return L;
   }
 
+  /* 역전 코스: 수문이 앞선 구슬을 붙잡아 무리를 다시 모으고, 워프 문·블랙홀이 순위를 크게 뒤집는다 */
+  function flipLayout() {
+    const L = [['h', 4700]];
+    const T = (y, name) => L.push(['t', y, name]);
+    const pins = (y0, rows, gap) => {
+      for (let i = 0; i < rows; i++) {
+        const y = y0 + i * gap;
+        if (i % 2 === 0) { for (let j = 0; j < 8; j++) L.push(['p', 50 + j * 60, y]); }
+        else { for (let j = 0; j < 7; j++) L.push(['p', 80 + j * 60, y]); L.push(['p', 20, y, 9], ['p', 500, y, 9]); }
+      }
+    };
+    // 1. 출발 핀 비
+    T(320, '출발');
+    pins(345, 8, 46);
+    // 2. 첫 수문 → 섞기 (풍차가 쏟아진 무리를 마구 섞음)
+    T(740, '수문 1');
+    L.push(['w', 12, 770, 70, 800], ['w', 508, 770, 450, 800]);
+    L.push(['g', 20, 840, 500, 3]);
+    L.push(['r', 140, 960, 4, 70, 3.2], ['r', 380, 960, 4, 70, -3.2], ['r', 260, 1080, 3, 90, 2.4],
+      ['r', 120, 1210, 2, 85, -3.0], ['r', 400, 1210, 2, 85, 3.0]);
+    L.push(['b', 260, 1215, 18, 560], ['b', 20, 1060, 12, 420], ['b', 500, 1060, 12, 420]);
+    L.push(['p', 60, 1110], ['p', 460, 1110], ['p', 260, 1300], ['p', 150, 1330], ['p', 370, 1330]);
+    // 3. 운명의 갈림길: 가운데 칸막이로 왼쪽·오른쪽 길. 양쪽 다 지름길(초록)과 되돌이(빨강) 문이 있음
+    T(1380, '갈림길');
+    L.push(['r', 260, 1430, 2, 60, 3.6]);
+    L.push(['w', 260, 1500, 260, 2180]);
+    // 양쪽 길은 핀 밭이라 흐름이 퍼짐 → 문마다 대략 다섯에 하나꼴로 걸림
+    for (let i = 0; i < 14; i++) {
+      const y = 1560 + i * 44, xs = i % 2 === 0 ? [50, 98, 146, 194] : [74, 122, 170, 218];
+      for (const x of xs) L.push(['p', x, y], ['p', 520 - x, y]);
+    }
+    L.push(['o', 122, 1736, 380, 2620], ['o', 170, 2000, 260, 1000]);
+    L.push(['o', 398, 1736, 140, 2620], ['o', 350, 2000, 260, 1000]);
+    L.push(['w', 12, 2200, 200, 2280], ['w', 508, 2200, 320, 2280]);
+    // 4. 범퍼 숲 + 블랙홀
+    T(2320, '범퍼 숲');
+    L.push(['b', 160, 2420, 22, 620], ['b', 360, 2420, 22, 620], ['b', 260, 2520, 24, 640],
+      ['b', 110, 2640, 20, 600], ['b', 410, 2640, 20, 600], ['b', 260, 2760, 22, 620],
+      ['b', 20, 2540, 12, 420], ['b', 500, 2540, 12, 420]);
+    L.push(['p', 60, 2440], ['p', 460, 2440], ['p', 260, 2380], ['p', 180, 2720], ['p', 340, 2720], ['p', 70, 2820], ['p', 450, 2820]);
+    L.push(['x', 260, 2650], ['x', 90, 2900], ['x', 430, 2900]);
+    // 5. 두 번째 수문 → 룰렛
+    T(3000, '수문 2');
+    L.push(['w', 12, 3040, 80, 3075], ['w', 508, 3040, 440, 3075]);
+    L.push(['g', 20, 3120, 500, 3]);
+    L.push(['r', 260, 3260, 2, 140, 2.0], ['r', 110, 3400, 4, 60, -3.4], ['r', 410, 3400, 4, 60, 3.4],
+      ['r', 260, 3520, 3, 80, -2.6]);
+    L.push(['b', 260, 3390, 16, 520], ['p', 60, 3270], ['p', 460, 3270], ['p', 180, 3620], ['p', 340, 3620]);
+    // 6. 막판 역전: 경사로 끝마다 블랙홀, 마지막 수문
+    T(3680, '막판 역전');
+    L.push(['w', 12, 3720, 330, 3820], ['x', 440, 3830], ['w', 508, 3910, 190, 4010], ['x', 80, 4030],
+      ['w', 12, 4100, 330, 4200], ['x', 440, 4210]);
+    L.push(['p', 460, 3740], ['p', 60, 3930], ['p', 460, 4120]);
+    T(4300, '마지막 수문');
+    L.push(['w', 12, 4320, 80, 4350], ['w', 508, 4320, 440, 4350]);
+    L.push(['g', 20, 4400, 500, 2.5]);
+    for (let x = 80; x <= 440; x += 60) L.push(['p', x, 4500]);
+    for (let x = 110; x <= 410; x += 60) L.push(['p', x, 4560]);
+    L.push(['r', 140, 4630, 2, 60, 3.0], ['r', 380, 4630, 2, 60, -3.0]);
+    return L;
+  }
+
   /* 밖에서 들어온 레이아웃(공유 코드 등)을 안전한 범위로 다듬는다 */
   /* 코스 길이: ['h', 끝 y] (기본 3100, 최대 8100) */
   function layoutEnd(items) {
@@ -758,6 +827,15 @@ legend { padding: 0; margin-bottom: 6px; }
       else if (t === 'b') out.push(['b', X(it[1]), Y(it[2]), n(it[3], 10, 34, 22), n(it[4], 200, 800, 560)]);
       else if (t === 'r') out.push(['r', X(it[1]), Y(it[2]), Math.round(n(it[3], 2, 4, 4)), n(it[4], 30, 120, 66), n(it[5], -4, 4, 2)]);
       else if (t === 'x') { if (out.filter((o) => o[0] === 'x').length < MAX_HOLES) out.push(['x', n(it[1], 60, 460, 260), Y(it[2])]); }
+      else if (t === 'g') {
+        if (out.filter((o) => o[0] === 'g').length >= MAX_GATES) continue;
+        const a = X(it[1]), b = X(it[3]);
+        if (Math.abs(b - a) >= 60) out.push(['g', Math.min(a, b), Y(it[2]), Math.max(a, b), n(it[4], 1, 6, 3)]);
+      }
+      else if (t === 'o') {
+        if (out.filter((o) => o[0] === 'o').length >= MAX_PORTALS) continue;
+        out.push(['o', n(it[1], 40, 480, 260), Y(it[2]), n(it[3], 40, 480, 260), Y(it[4])]);
+      }
       else if (t === 'w') {
         const w = ['w', X(it[1]), Y(it[2]), X(it[3]), Y(it[4])];
         if (Math.hypot(w[3] - w[1], w[4] - w[2]) >= 12) out.push(w);
@@ -771,7 +849,7 @@ legend { padding: 0; margin-bottom: 6px; }
     const items = custom ? cleanLayout(layout) : defaultLayout();
     const end = custom ? layoutEnd(items) : END_DEFAULT;
     const W = MAP_W, HH = end + 440;
-    const segs = [], circs = [], rotors = [], holes = [];
+    const segs = [], circs = [], rotors = [], holes = [], gates = [], portals = [];
 
     const seg = (ax, ay, bx, by, t, kind, e, f) => {
       const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy) || 1;
@@ -798,6 +876,13 @@ legend { padding: 0; margin-bottom: 6px; }
       else if (it[0] === 'r') rotor(it[1], it[2], it[3], it[4], it[5]);
       else if (it[0] === 'w') seg(it[1], it[2], it[3], it[4], 7, 'shelf', 0.25, 0.02);
       else if (it[0] === 'x') holes.push({ x: it[1], y: it[2], open: 0, t: 0, cycle: 8, openDur: 3.5, spin: 0 });
+      else if (it[0] === 'g') {
+        // 수문: 왼쪽·오른쪽 두 짝이 가운데에서 만남. closed 1 = 닫힘, 0 = 활짝 열림
+        const g = { x0: it[1], x1: it[3], y: it[2], wait: it[4], closed: 1, state: 'wait', t: 0, flash: 0, segs: [] };
+        for (let k = 0; k < 2; k++) g.segs.push({ seg: true, ax: 0, ay: g.y, bx: 0, by: g.y, t: 7, kind: 'gate', e: 0.2, f: 0.04, len2: 1, nx: 0, ny: -1, flash: 0 });
+        gates.push(g);
+      }
+      else if (it[0] === 'o') portals.push({ x: it[1], y: it[2], tx: it[3], ty: it[4], up: it[4] < it[2], flash: 0, spin: 0 });
     }
 
     // 고정 틀: 결승 깔때기
@@ -813,7 +898,7 @@ legend { padding: 0; margin-bottom: 6px; }
     secs.push({ key: 'final', label: '결승', y0: end - 20, y1: HH });
 
     const map = {
-      W, H: HH, R, segs, circs, rotors, holes, custom, layout: items,
+      W, H: HH, R, segs, circs, rotors, holes, gates, portals, custom, layout: items,
       finishY: end + 340,
       gateY: 284,
       spawn: { x0: 20, x1: 500, yBottom: 262 },
@@ -1049,6 +1134,10 @@ legend { padding: 0; margin-bottom: 6px; }
         h.t = this.rng() * h.cycle; h.open = 0; h.spin = 0;
       }
       this.warpCount = 0;
+      this.gateCount = 0;
+      this.portalCount = 0;
+      for (const g of map.gates) { g.closed = 1; g.state = 'wait'; g.t = 0; g.flash = 0; this.placeGate(g); }
+      for (const o of map.portals) { o.flash = 0; o.spin = 0; }
       for (const o of map.circs) o.flash = 0;
     }
 
@@ -1074,7 +1163,7 @@ legend { padding: 0; margin-bottom: 6px; }
     }
 
     substep(H) {
-      const map = this.map, act = this.active, rotors = map.rotors;
+      const map = this.map, act = this.active, rotors = map.rotors, gates = map.gates;
       this.time += H;
       for (let i = 0; i < rotors.length; i++) rotors[i].angle += rotors[i].omega * H;
 
@@ -1099,6 +1188,7 @@ legend { padding: 0; margin-bottom: 6px; }
           if (o.seg) collideSeg(m, o, this); else collideCirc(m, o, this);
         }
         for (let k = 0; k < rotors.length; k++) collideRotor(m, rotors[k], this);
+        if (gates.length) this.collideGates(m, gates);
 
         // 바깥 벽은 무조건 넘지 못하게 (구슬이 아주 많을 때 눌려서 밀려나는 것 방지)
         if (m.x < 20 + R) { m.x = 20 + R; if (m.vx < 0) m.vx = 0; }
@@ -1120,7 +1210,8 @@ legend { padding: 0; margin-bottom: 6px; }
       }
 
       if (this.cats) this.updateCat(H);
-      if (map.holes.length) this.updateHoles(H);
+      if (gates.length) this.updateGates(H);
+      if (map.holes.length || map.portals.length) this.updateHoles(H);
 
       let fin = null;
       for (let i = act.length - 1; i >= 0; i--) {
@@ -1180,6 +1271,25 @@ legend { padding: 0; margin-bottom: 6px; }
           m.vy += ((dy / d) * 1150 + (dx / d) * 420) * k * H - GRAV * 0.6 * k * H;
         }
       }
+      // 워프 문: 입구에 닿으면 정해진 곳으로 바로 보냄
+      for (const o of map.portals) {
+        o.spin += H * 3;
+        if (o.flash > 0) o.flash = Math.max(0, o.flash - H * 2);
+        for (let i = act.length - 1; i >= 0; i--) {
+          const m = act[i];
+          if (m.immune > 0 || m.catTarget) continue;
+          const dx = o.x - m.x, dy = o.y - m.y;
+          if (dx * dx + dy * dy >= PORTAL_R * PORTAL_R) continue;
+          act.splice(i, 1);
+          m.warpTo = { x: o.tx, y: o.ty };
+          m.warpFrom = o; m.warpX = m.x; m.warpY = m.y; m.warpT = 0;
+          m.vx = 0; m.vy = 0;
+          this.held.push(m);
+          o.flash = 1;
+          this.portalCount++;
+          this.events.push({ type: 'warpin', m, x: o.x, y: o.y, up: o.up, portal: true });
+        }
+      }
       // 빨려 들어가는 중 / 다시 나타나는 중
       for (let i = this.held.length - 1; i >= 0; i--) {
         const m = this.held[i];
@@ -1202,6 +1312,60 @@ legend { padding: 0; margin-bottom: 6px; }
       for (const m of act) {
         if (m.immune > 0) m.immune -= H;
         if (m.ws < 1) m.ws = Math.min(1, m.ws + H * 3);
+      }
+    }
+
+    /* 수문 짝 두 개의 위치를 닫힌 정도에 맞춰 다시 잡는다 */
+    placeGate(g) {
+      const half = ((g.x1 - g.x0) / 2) * g.closed;
+      const a = g.segs[0], b = g.segs[1];
+      a.ax = g.x0; a.bx = g.x0 + half; b.ax = g.x1 - half; b.bx = g.x1;
+      a.len2 = b.len2 = Math.max(1, half * half);
+    }
+
+    collideGates(m, gates) {
+      for (let k = 0; k < gates.length; k++) {
+        const g = gates[k];
+        if (g.closed < 0.02 || m.x < g.x0 - R || m.x > g.x1 + R) continue;
+        if (Math.abs(m.y - g.y) > R + 20) continue;
+        collideSeg(m, g.segs[0], this); collideSeg(m, g.segs[1], this);
+        // 위에 쌓인 구슬이 많아 눌려도 닫힌 문을 뚫고 내려가지 않게
+        if (g.closed > 0.98 && m.y < g.y && m.y > g.y - R - 7) { m.y = g.y - R - 7; if (m.vy > 0) m.vy = 0; }
+      }
+    }
+
+    /* 수문: 닫힌 채 기다림 → 첫 구슬이 닿으면 wait초 붙잡음 → 활짝 열림 → 근처가 비면 다시 닫힘 */
+    updateGates(H) {
+      const act = this.active;
+      for (const g of this.map.gates) {
+        g.t += H;
+        if (g.flash > 0) g.flash = Math.max(0, g.flash - H * 1.5);
+        if (g.state === 'wait' || g.state === 'hold') {
+          g.closed = Math.min(1, g.closed + H * 3);
+          let near = false;
+          for (let i = 0; i < act.length; i++) {
+            const m = act[i];
+            if (m.y >= g.y || m.x < g.x0 || m.x > g.x1 || m.y < g.y - 1400) continue;
+            if (g.state === 'hold') m.stall = 0;           // 문이 붙잡고 있는 동안 기다리는 건 '막힘'이 아님
+            if (m.y > g.y - 60) near = true;
+          }
+          if (g.state === 'wait' && near) { g.state = 'hold'; g.t = 0; this.events.push({ type: 'gatehold', g }); }
+          else if (g.state === 'hold' && g.t >= g.wait) {
+            g.state = 'open'; g.t = 0; g.flash = 1; this.gateCount++;
+            this.events.push({ type: 'gateopen', g, x: (g.x0 + g.x1) / 2, y: g.y });
+          }
+        } else {
+          g.closed = Math.max(0, g.closed - H * 3.2);
+          if (g.t > GATE_OPEN) {
+            let busy = false;
+            for (let i = 0; i < act.length && !busy; i++) {
+              const m = act[i];
+              if (m.x > g.x0 && m.x < g.x1 && Math.abs(m.y - g.y) < 34) busy = true;
+            }
+            if (!busy) { g.state = 'wait'; g.t = 0; }
+          }
+        }
+        this.placeGate(g);
       }
     }
 
@@ -1379,7 +1543,7 @@ legend { padding: 0; margin-bottom: 6px; }
     }
   }
 
-  const api = { TOP, R, STEP, SKILL_RADIUS: 110, EDIT, MAX_ITEMS, MAX_HOLES, HOLE_PULL, TIME_LIMIT, CAT_REACH, CAT_OUT, defaultLayout, longLayout, cleanLayout, encodeLayout, decodeLayout, MAX_MARBLES, buildMap, spawnSlots, parseEntries, Race, mulberry32 };
+  const api = { flipLayout, PORTAL_R, TOP, R, STEP, SKILL_RADIUS: 110, EDIT, MAX_ITEMS, MAX_HOLES, HOLE_PULL, TIME_LIMIT, CAT_REACH, CAT_OUT, defaultLayout, longLayout, cleanLayout, encodeLayout, decodeLayout, MAX_MARBLES, buildMap, spawnSlots, parseEntries, Race, mulberry32 };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PinballEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -1425,7 +1589,7 @@ legend { padding: 0; margin-bottom: 6px; }
     dmd: tok('--dmd', '#ff922e'), dmdOff: tok('--dmd-off', '#2a190b'), dmdBg: tok('--dmd-bg', '#0b0705'),
     insert: tok('--insert', '#ff4d7a'), insertHi: tok('--insert-hi', '#ff9bb4'), insertLo: tok('--insert-lo', '#b3163e'),
     brass: tok('--brass', '#e6b85c'), ramp: tok('--ramp', '#3cc8b4'), spinner: tok('--spinner', '#6b8cff'),
-    hole: tok('--hole', '#9b5cff'), fur: tok('--fur', '#f2a35e'), furDark: tok('--fur-dark', '#b0642a'), bean: tok('--bean', '#ff9fb4'),
+    hole: tok('--hole', '#9b5cff'), boost: tok('--boost', '#5ee08a'), setback: tok('--setback', '#ff6a52'), fur: tok('--fur', '#f2a35e'), furDark: tok('--fur-dark', '#b0642a'), bean: tok('--bean', '#ff9fb4'),
     ink: tok('--ink', '#f3eee6'), muted: tok('--muted', '#a39bb2'), line: tok('--line', '#372e45'),
   };
   const FONT_DISPLAY = tok('--font-display', 'sans-serif');
@@ -1845,6 +2009,11 @@ legend { padding: 0; margin-bottom: 6px; }
       g.fillStyle = C.hole;
       g.beginPath(); g.ellipse(X(h.x), Y(h.y), Math.max(2, 14 * kx), Math.max(2, 14 * ky), 0, 0, TAU); g.fill();
     }
+    for (const gt of MAP.gates) { g.fillStyle = C.dmd; g.fillRect(X(gt.x0), Y(gt.y) - 1, (gt.x1 - gt.x0) * kx, 2); }
+    for (const o of MAP.portals) {
+      g.fillStyle = o.up ? C.setback : C.boost;
+      g.beginPath(); g.arc(X(o.x), Y(o.y), 2.4, 0, TAU); g.fill();
+    }
     g.fillStyle = C.ink;
     g.fillRect(X(MAP.chute.x0), Y(MAP.finishY) - 1, (MAP.chute.x1 - MAP.chute.x0) * kx, 2);
   }
@@ -2116,11 +2285,20 @@ legend { padding: 0; margin-bottom: 6px; }
       else if (ev.type === 'cat') onCat(ev, now);
       else if (ev.type === 'catgrab') onCatGrab(ev, now);
       else if (ev.type === 'warpin') {
-        if (ev.y > y0 && ev.y < y1) { Sound.warp(); S.rings.push({ x: ev.x, y: ev.y, color: C.hole, t: 0 }); }
+        const col = ev.portal ? (ev.up ? C.setback : C.boost) : C.hole;
+        if (ev.y > y0 && ev.y < y1) { Sound.warp(); S.rings.push({ x: ev.x, y: ev.y, color: col, t: 0 }); }
         const focus = currentFocus();
         if (!S.winner && (ev.m === focus || S.race.N <= 12) && now - S.lastSkillMsg > 900) {
           S.lastSkillMsg = now;
-          DMD.flash(`워프! ${ev.m.name} ${ev.up ? '위로' : '아래로'}`, 1.2);
+          DMD.flash(ev.portal ? `${ev.up ? '되돌이' : '지름길'}! ${ev.m.name}` : `워프! ${ev.m.name} ${ev.up ? '위로' : '아래로'}`, 1.2);
+        }
+      } else if (ev.type === 'gateopen') {
+        if (ev.y > y0 - 200 && ev.y < y1 + 200) { Sound.count(true); sparks(ev.x, ev.y, C.dmd, reduceMotion ? 4 : 14); }
+        if (!S.winner && now - S.lastSkillMsg > 500) { S.lastSkillMsg = now; DMD.flash('수문 열림!', 1.0); }
+      } else if (ev.type === 'gatehold') {
+        if (!S.winner && now - S.lastSkillMsg > 900 && now - (S.lastGateMsg || 0) > 4000) {
+          S.lastSkillMsg = now; S.lastGateMsg = now;
+          DMD.flash('수문 닫힘 · 다 모여!', 1.2);
         }
       } else if (ev.type === 'warpout') {
         if (ev.y > y0 && ev.y < y1) { Sound.unwarp(); S.rings.push({ x: ev.x, y: ev.y, color: C.hole, t: 0 }); sparks(ev.x, ev.y, C.hole, 12); }
@@ -2518,6 +2696,85 @@ legend { padding: 0; margin-bottom: 6px; }
     }
   }
 
+  /* 수문: 노랑·검정 줄무늬 두 짝이 가운데에서 만남. 붙잡는 동안 가운데 배지에 남은 초 */
+  function drawGates(t, y0, y1) {
+    const still = S.phase === 'setup' || S.phase === 'edit' || S.phase === 'countdown';
+    for (const g of MAP.gates) {
+      if (g.y < y0 - 60 || g.y > y1 + 60) continue;
+      const closed = still ? 1 : g.closed, half = ((g.x1 - g.x0) / 2) * closed;
+      // 문틀 기둥
+      fx.fillStyle = C.chromeDark;
+      fx.fillRect(g.x0 - 4, g.y - 11, 8, 22); fx.fillRect(g.x1 - 4, g.y - 11, 8, 22);
+      if (half > 1) {
+        for (const [a, b] of [[g.x0, g.x0 + half], [g.x1 - half, g.x1]]) {
+          fx.fillStyle = 'rgba(0, 0, 0, 0.42)'; fx.fillRect(a + 3, g.y - 5, b - a, 13);
+          fx.save();
+          fx.beginPath(); fx.rect(a, g.y - 7, b - a, 13); fx.clip();
+          fx.fillStyle = C.dmd; fx.fillRect(a, g.y - 7, b - a, 13);
+          fx.fillStyle = C.cabinet;
+          const off = (g.x1 - g.x0) / 2 - half;          // 줄무늬가 문짝과 같이 움직이게
+          const base = a === g.x0 ? a - off : a;
+          for (let x = base - 20; x < b + 20; x += 20) {
+            fx.beginPath(); fx.moveTo(x, g.y + 6); fx.lineTo(x + 8, g.y + 6); fx.lineTo(x + 18, g.y - 7); fx.lineTo(x + 10, g.y - 7); fx.closePath(); fx.fill();
+          }
+          fx.restore();
+          fx.strokeStyle = 'rgba(255, 255, 255, 0.35)'; fx.lineWidth = 1.2;
+          fx.beginPath(); fx.moveTo(a, g.y - 6.4); fx.lineTo(b, g.y - 6.4); fx.stroke();
+        }
+      }
+      const cx = (g.x0 + g.x1) / 2;
+      if (!still && g.state === 'hold') {
+        const left = Math.max(0, g.wait - g.t), k = left / g.wait;
+        fx.fillStyle = C.cabinet; circle(cx, g.y, 19); fx.fill();
+        fx.strokeStyle = rgba(C.dmd, 0.35); fx.lineWidth = 4; circle(cx, g.y, 15); fx.stroke();
+        fx.strokeStyle = C.dmd; fx.beginPath(); fx.arc(cx, g.y, 15, -Math.PI / 2, -Math.PI / 2 + TAU * k); fx.stroke();
+        fx.fillStyle = C.dmd; fx.font = `16px ${FONT_DISPLAY}`; fx.textAlign = 'center'; fx.textBaseline = 'middle';
+        fx.fillText(String(Math.ceil(left)), cx, g.y + 1);
+      }
+      if (g.flash > 0.02) {
+        fx.globalCompositeOperation = 'lighter'; fx.globalAlpha = g.flash;
+        fx.drawImage(glow(C.dmd), g.x0, g.y - 40, g.x1 - g.x0, 80);
+        fx.globalCompositeOperation = 'source-over'; fx.globalAlpha = 1;
+      }
+    }
+  }
+
+  /* 워프 문: 초록 = 지름길(아래로), 빨강 = 되돌이(위로). 나오는 곳엔 작은 점선 고리 */
+  function drawPortals(t, y0, y1) {
+    const edit = S.phase === 'edit', PR = E.PORTAL_R;
+    for (const o of MAP.portals) {
+      const col = o.up ? C.setback : C.boost;
+      if (edit) {
+        fx.setLineDash([3, 7]); fx.strokeStyle = rgba(col, 0.4); fx.lineWidth = 2;
+        fx.beginPath(); fx.moveTo(o.x, o.y); fx.lineTo(o.tx, o.ty); fx.stroke(); fx.setLineDash([]);
+      }
+      if (o.ty > y0 - 30 && o.ty < y1 + 30) {
+        fx.save(); fx.translate(o.tx, o.ty); fx.rotate(-t * 1.5);
+        fx.setLineDash([5, 5]); fx.strokeStyle = rgba(col, 0.55); fx.lineWidth = 2;
+        circle(0, 0, 13); fx.stroke(); fx.setLineDash([]);
+        fx.restore();
+      }
+      if (o.y < y0 - 40 || o.y > y1 + 40) continue;
+      const f = o.flash || 0, spin = edit ? t : (o.spin || t * 3);
+      fx.globalCompositeOperation = 'lighter'; fx.globalAlpha = 0.35 + 0.25 * Math.sin(t * 4) + f * 0.4;
+      const gs = 30 + f * 16;
+      fx.drawImage(glow(col), o.x - gs, o.y - gs, gs * 2, gs * 2);
+      fx.globalCompositeOperation = 'source-over'; fx.globalAlpha = 1;
+      fx.save(); fx.translate(o.x, o.y);
+      fx.fillStyle = C.cabinet; circle(0, 0, PR + 1); fx.fill();
+      fx.lineWidth = 3; fx.strokeStyle = col; circle(0, 0, PR + 1); fx.stroke();
+      fx.rotate(spin);
+      fx.strokeStyle = rgba(col, 0.7); fx.lineWidth = 2;
+      for (let k = 0; k < 3; k++) { fx.rotate(TAU / 3); fx.beginPath(); fx.arc(0, 0, PR - 5, 0, 1.3); fx.stroke(); }
+      fx.restore();
+      // 화살표 (아래 = 지름길, 위 = 되돌이)
+      const d = o.up ? -1 : 1;
+      fx.fillStyle = col;
+      fx.beginPath(); fx.moveTo(o.x - 6, o.y - 3 * d); fx.lineTo(o.x + 6, o.y - 3 * d); fx.lineTo(o.x, o.y + 6 * d); fx.closePath(); fx.fill();
+      fx.fillRect(o.x - 2, o.y - 9 * d - (d > 0 ? 0 : 6), 4, 6);
+    }
+  }
+
   function drawRings() {
     for (const r of S.rings) {
       const k = r.t / 0.45, rad = 14 + (E.SKILL_RADIUS - 14) * (1 - Math.pow(1 - k, 3));
@@ -2648,6 +2905,8 @@ legend { padding: 0; margin-bottom: 6px; }
     drawBumpers(y0, y1);
     drawRotors(y0, y1);
     drawGate(S.phase === 'setup' || S.phase === 'edit' ? 0 : S.gate);
+    if (MAP.gates.length) drawGates(t, y0, y1);
+    if (MAP.portals.length) drawPortals(t, y0, y1);
     if (S.phase === 'edit') Editor.draw(y0, y1, t);
     const list = marblesForDraw();
     drawHoles(t, y0, y1);
@@ -2681,6 +2940,7 @@ legend { padding: 0; margin-bottom: 6px; }
     const BUILTIN = [
       { id: 'default', name: '기본 코스', layout: undefined },
       { id: 'long', name: '롱 코스 · 다이나믹', layout: E.longLayout() },
+      { id: 'flip', name: '역전 코스 · 엎치락뒤치락', layout: E.flipLayout() },
     ];
     const builtin = (id) => BUILTIN.find((b) => b.id === id);
     const read = () => {
@@ -2787,6 +3047,8 @@ legend { padding: 0; margin-bottom: 6px; }
         if (it[0] === 'r' && Math.hypot(w.x - it[1], w.y - it[2]) < Math.max(22, tol * 1.4)) return i;
         if (it[0] === 'x' && Math.hypot(w.x - it[1], w.y - it[2]) < 22 + tol * 0.5) return i;
         if (it[0] === 'w' && segDist(w.x, w.y, it[1], it[2], it[3], it[4]) < 7 + tol * 0.7) return i;
+        if (it[0] === 'g' && segDist(w.x, w.y, it[1], it[2], it[3], it[2]) < 8 + tol * 0.7) return i;
+        if (it[0] === 'o' && Math.hypot(w.x - it[1], w.y - it[2]) < E.PORTAL_R + 4 + tol * 0.5) return i;
       }
       return -1;
     }
@@ -2906,6 +3168,8 @@ legend { padding: 0; margin-bottom: 6px; }
           if (it[0] === 'w') {
             it[1] = clampX(o[1] + ddx); it[2] = clampY(o[2] + ddy);
             it[3] = clampX(o[3] + ddx); it[4] = clampY(o[4] + ddy);
+          } else if (it[0] === 'g') {
+            it[1] = clampX(o[1] + ddx); it[2] = clampY(o[2] + ddy); it[3] = clampX(o[3] + ddx);
           } else { it[1] = clampX(o[1] + ddx); it[2] = clampY(o[2] + ddy); }
           setMap(ED.layout);
         }
@@ -2947,11 +3211,11 @@ legend { padding: 0; margin-bottom: 6px; }
         for (let y = gy0; y <= gy1; y += 40) for (let x = 40; x <= 480; x += 40) fx.fillRect(x - 1, y - 1, 2, 2);
         const it = ED.layout[ED.sel];
         if (it) {
-          if (it[0] === 'w') {
+          if (it[0] === 'w' || it[0] === 'g') {
             fx.lineCap = 'round'; fx.lineWidth = 24; fx.strokeStyle = rgba(C.dmd, 0.3);
-            fx.beginPath(); fx.moveTo(it[1], it[2]); fx.lineTo(it[3], it[4]); fx.stroke();
+            fx.beginPath(); fx.moveTo(it[1], it[2]); fx.lineTo(it[3], it[0] === 'g' ? it[2] : it[4]); fx.stroke();
           } else {
-            const r = it[0] === 'r' ? it[4] + 8 : it[0] === 'b' ? it[3] + 8 : it[0] === 'x' ? 26 : (it[3] || 6) + 8;
+            const r = it[0] === 'r' ? it[4] + 8 : it[0] === 'b' ? it[3] + 8 : it[0] === 'x' ? 26 : it[0] === 'o' ? E.PORTAL_R + 10 : (it[3] || 6) + 8;
             fx.strokeStyle = C.dmd; fx.lineWidth = 2.5; fx.setLineDash([6, 5]);
             circle(it[1], it[2], r); fx.stroke(); fx.setLineDash([]);
           }
